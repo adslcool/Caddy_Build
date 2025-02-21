@@ -53,11 +53,9 @@ jobs:
         export GOARCH=${{ matrix.config.GOARCH }} 
         export GOOS=${{ matrix.config.GOOS }} 
         ~/go/bin/xcaddy build \
-          --with github.com/mholt/caddy-l4 \
-          --with github.com/caddy-dns/cloudflare \
-          --with github.com/WeidiDeng/caddy-cloudflare-ip \
-          --with github.com/xcaddyplugins/caddy-trusted-cloudfront \
-          --with github.com/mholt/caddy-webdav \
+          --with github.com/mholt/caddy-l4/modules/l4proxyprotocol \
+          --with github.com/mholt/caddy-l4/modules/l4tls \
+          --with github.com/mholt/caddy-l4/modules/l4proxy \
           --output ./release-tmp/caddy
 
     - name: Rename for Windows 
