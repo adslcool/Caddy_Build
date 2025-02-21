@@ -56,10 +56,6 @@ jobs:
           --with github.com/mholt/caddy-l4/modules/l4proxyprotocol \
           --with github.com/mholt/caddy-l4/modules/l4tls \
           --with github.com/mholt/caddy-l4/modules/l4proxy \
-          --with github.com/caddy-dns/cloudflare \
-          --with github.com/WeidiDeng/caddy-cloudflare-ip \
-          --with github.com/xcaddyplugins/caddy-trusted-cloudfront \
-          --with github.com/mholt/caddy-webdav \
           --output ./release-tmp/caddy
 
     - name: Rename for Windows 
