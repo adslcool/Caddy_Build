@@ -55,15 +55,9 @@ jobs:
         ~/go/bin/xcaddy build \
           --with github.com/mholt/caddy-l4/modules/l4echo \
           --with github.com/mholt/caddy-l4/modules/l4proxy \
-          --with github.com/mholt/caddy-l4/modules/l4proxyprotocol \
-          --with github.com/mholt/caddy-l4/modules/l4tee \
-          --with github.com/mholt/caddy-l4/modules/l4throttle \
-          --with github.com/mholt/caddy-l4/modules/l4tls \
           --with github.com/mholt/caddy-l4/modules/l4http \
-          --with github.com/mholt/caddy-l4/modules/l4proxy \
-          --with github.com/mholt/caddy-l4/modules/l4ssh \
+          --with github.com/mholt/caddy-l4/modules/l4proxyprotocol \
           --with github.com/mholt/caddy-l4/modules/l4tls \
-          --with github.com/mholt/caddy-l4/modules/l4xmpp \
           --with github.com/caddy-dns/cloudflare \
           --with github.com/WeidiDeng/caddy-cloudflare-ip \
           --with github.com/xcaddyplugins/caddy-trusted-cloudfront \
