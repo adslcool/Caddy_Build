@@ -1,115 +1,465 @@
-name: Build caddy
+name: Build and release Caddy
 
 on:
   workflow_dispatch:
+    inputs:
+      caddy_version:
+        description: 'Caddy 版本：latest 或 v2.x.x'
+        required: false
+        default: latest
+        type: string
 
-  release:
-    types: 
-      - 'prereleased' 
-      - 'published' 
-      - 'released'
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: caddy-release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build:
+  prepare:
+    name: Resolve Caddy version
+
     runs-on: ubuntu-latest
+
+    outputs:
+      caddy_version: ${{ steps.version.outputs.caddy_version }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
+      deb_version: ${{ steps.version.outputs.deb_version }}
+
+    steps:
+      - name: Resolve upstream Caddy version
+        id: version
+
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_CADDY_VERSION: ${{ inputs.caddy_version || 'latest' }}
+
+        shell: bash
+
+        run: |
+          set -Eeuo pipefail
+
+          if [[ "$GITHUB_REF_TYPE" == 'tag' ]]; then
+            caddy_version="$GITHUB_REF_NAME"
+
+          elif [[ "$REQUESTED_CADDY_VERSION" == 'latest' ]]; then
+            caddy_version="$(gh api \
+              repos/caddyserver/caddy/releases/latest \
+              --jq '.tag_name')"
+
+          else
+            caddy_version="$REQUESTED_CADDY_VERSION"
+          fi
+
+          if [[ ! "$caddy_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9._-]+)?$ ]]; then
+            printf '无效的 Caddy 版本：%s\n' "$caddy_version" >&2
+            exit 1
+          fi
+
+          {
+            printf 'caddy_version=%s\n' "$caddy_version"
+            printf 'release_tag=%s\n' "$caddy_version"
+
+            printf 'deb_version=%s+build%s\n' \
+              "${caddy_version#v}" \
+              "$GITHUB_RUN_NUMBER"
+          } >>"$GITHUB_OUTPUT"
+
+          printf '本次构建 Caddy 版本：%s\n' "$caddy_version"
+
+  build:
+    name: Build ${{ matrix.name }}
+
+    needs: prepare
+
+    runs-on: ubuntu-latest
+
     strategy:
       fail-fast: false
+
       matrix:
-        config:
-        - {
-            name: "windows-amd64",
-            GOARCH: amd64,
-            GOOS: windows,
-            release: true
-          }
-        - {
-            name: "linux-amd64",
-            GOARCH: amd64,
-            GOOS: linux,
-            release: true
-          }
-        - {
-            name: "linux-arm64",
-            GOARCH: arm64,
-            GOOS: linux,
-            release: true
-          }
+        include:
+          - name: windows-amd64
+            goos: windows
+            goarch: amd64
+
+          - name: linux-amd64
+            goos: linux
+            goarch: amd64
+
+          - name: linux-arm64
+            goos: linux
+            goarch: arm64
+
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v7
 
-    - name: Install go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.23'
-        check-latest: true
-    
-    - name: Install xcaddy
-      run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
-    
-    - name: Build caddy
-      run: |
-        mkdir release-tmp
-        export GOARCH=${{ matrix.config.GOARCH }} 
-        export GOOS=${{ matrix.config.GOOS }} 
-        ~/go/bin/xcaddy build \
-          --with github.com/mholt/caddy-l4/modules/l4echo \
-          --with github.com/mholt/caddy-l4/modules/l4proxy \
-          --with github.com/mholt/caddy-l4/modules/l4http \
-          --with github.com/mholt/caddy-l4/modules/l4proxyprotocol \
-          --with github.com/mholt/caddy-l4/modules/l4tls \
-          --with github.com/greenpau/caddy-security \
-          --with github.com/caddy-dns/cloudflare \
-          --with github.com/WeidiDeng/caddy-cloudflare-ip \
-          --with github.com/xcaddyplugins/caddy-trusted-cloudfront \
-          --with github.com/mholt/caddy-webdav \
-          --with github.com/porech/caddy-maxmind-geolocation \
-          --output ./release-tmp/caddy
+      - name: Install latest stable Go
+        uses: actions/setup-go@v7
 
-    - name: Rename for Windows 
-      if: matrix.config.GOOS == 'windows'
-      run: |
-        mv ./release-tmp/caddy ./release-tmp/caddy.exe
-    
-    - name: Calculate Hash
-      run: |
-        cd ./release-tmp || exit 1
-        sha256sum * > sha256
+        with:
+          go-version: stable
+          check-latest: true
+          cache: false
 
-    - name: Generate zip for Windows
-      if: matrix.config.GOOS == 'windows'
-      run: |
-        mkdir release-ready
-        cd ./release-tmp
-        zip -r ../release-ready/caddy-${{ matrix.config.name }}.zip *
-    
-    - name: Generate tar for other platform
-      if: matrix.config.GOOS != 'windows'
-      run: |
-        mkdir release-ready
-        cd ./release-tmp
-        tar -zcvf ../release-ready/caddy-${{ matrix.config.name }}.tar.gz *
+      - name: Display Go version
+        run: go version
 
-    - name: Upload a Build Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: caddy-${{ github.sha }}-${{ matrix.config.name }}
-        path: ./release-ready/*
-        
-    - name: Upload to GitHub Release for Windows
-      uses: svenstaro/upload-release-action@v2
-      if: github.event_name == 'release' && matrix.config.release && matrix.config.GOOS == 'windows'
-      with:
-        repo_token: ${{ secrets.GITHUB_TOKEN }}
-        file: ./release-ready/caddy-${{ matrix.config.name }}.zip
-        tag: ${{ github.ref }}
-        overwrite: true
-        
-    - name: Upload to GitHub Release for other platform
-      uses: svenstaro/upload-release-action@v2
-      if: github.event_name == 'release' && matrix.config.release && matrix.config.GOOS != 'windows'
-      with:
-        repo_token: ${{ secrets.GITHUB_TOKEN }}
-        file: ./release-ready/caddy-${{ matrix.config.name }}.tar.gz
-        tag: ${{ github.ref }}
-        overwrite: true
+      - name: Install xcaddy
+
+        shell: bash
+
+        run: |
+          set -Eeuo pipefail
+
+          go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+
+          printf '%s/bin\n' "$(go env GOPATH)" >>"$GITHUB_PATH"
+
+      - name: Build custom Caddy
+
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+          CADDY_VERSION: ${{ needs.prepare.outputs.caddy_version }}
+
+        shell: bash
+
+        run: |
+          set -Eeuo pipefail
+
+          mkdir -p build release
+
+          binary_name='caddy'
+
+          if [[ "$GOOS" == 'windows' ]]; then
+            binary_name='caddy.exe'
+          fi
+
+          xcaddy build "$CADDY_VERSION" \
+            --with github.com/mholt/caddy-l4 \
+            --with github.com/greenpau/caddy-security \
+            --with github.com/caddy-dns/cloudflare \
+            --with github.com/WeidiDeng/caddy-cloudflare-ip \
+            --with github.com/xcaddyplugins/caddy-trusted-cloudfront \
+            --with github.com/mholt/caddy-webdav \
+            --with github.com/porech/caddy-maxmind-geolocation \
+            --output "build/$binary_name"
+
+          if [[ "$GOOS" == 'linux' && "$GOARCH" == 'amd64' ]]; then
+            "build/$binary_name" version
+
+            "build/$binary_name" list-modules \
+              --skip-standard \
+              --packages \
+              --versions
+          fi
+
+      - name: Create Windows archive
+
+        if: matrix.goos == 'windows'
+
+        shell: bash
+
+        run: |
+          set -Eeuo pipefail
+
+          cd build
+
+          sha256sum caddy.exe >SHA256SUMS
+
+          zip -9 \
+            "../release/caddy-${{ matrix.name }}.zip" \
+            caddy.exe \
+            SHA256SUMS
+
+      - name: Create Linux archive
+
+        if: matrix.goos == 'linux'
+
+        shell: bash
+
+        run: |
+          set -Eeuo pipefail
+
+          cd build
+
+          sha256sum caddy >SHA256SUMS
+
+          tar -czf \
+            "../release/caddy-${{ matrix.name }}.tar.gz" \
+            caddy \
+            SHA256SUMS
+
+      - name: Build Debian package with systemd service
+
+        if: matrix.goos == 'linux'
+
+        env:
+          PACKAGE_ARCH: ${{ matrix.goarch }}
+          PACKAGE_VERSION: ${{ needs.prepare.outputs.deb_version }}
+
+        shell: bash
+
+        run: |
+          set -Eeuo pipefail
+
+          package_root="$RUNNER_TEMP/caddy-package-$PACKAGE_ARCH"
+
+          mkdir -p \
+            "$package_root/DEBIAN" \
+            "$package_root/usr/bin" \
+            "$package_root/usr/lib/systemd/system" \
+            "$package_root/etc/caddy"
+
+          install \
+            -m 0755 \
+            build/caddy \
+            "$package_root/usr/bin/caddy"
+
+          cat >"$package_root/DEBIAN/control" <<EOF
+          Package: caddy-custom
+          Version: $PACKAGE_VERSION
+          Section: httpd
+          Priority: optional
+          Architecture: $PACKAGE_ARCH
+          Depends: ca-certificates, systemd
+          Provides: caddy
+          Conflicts: caddy
+          Replaces: caddy
+          Maintainer: adslcool <noreply@github.com>
+          Homepage: https://github.com/adslcool/Caddy_Build
+          Description: Custom Caddy server with Cloudflare, layer4, WebDAV and security plugins
+           Pre-built Caddy web server with a root-run systemd service for Debian.
+          EOF
+
+          cat >"$package_root/DEBIAN/conffiles" <<'EOF'
+          /etc/caddy/Caddyfile
+          /etc/caddy/caddy.env
+          EOF
+
+          cat >"$package_root/etc/caddy/Caddyfile" <<'EOF'
+          :80 {
+              respond "Caddy custom build is running."
+          }
+          EOF
+
+          : >"$package_root/etc/caddy/caddy.env"
+
+          cat >"$package_root/usr/lib/systemd/system/caddy.service" <<'EOF'
+          [Unit]
+          Description=Caddy custom web server
+          Documentation=https://caddyserver.com/docs/
+          After=network.target network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=notify
+
+          User=root
+          Group=root
+
+          Environment=XDG_DATA_HOME=/var/lib/caddy/.local/share
+          Environment=XDG_CONFIG_HOME=/var/lib/caddy/.config
+          EnvironmentFile=-/etc/caddy/caddy.env
+
+          ExecStartPre=/usr/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          ExecStart=/usr/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+          ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile --force
+
+          TimeoutStopSec=5s
+          LimitNOFILE=1048576
+
+          PrivateTmp=true
+          ProtectSystem=full
+
+          Restart=on-failure
+          RestartPreventExitStatus=1
+          RestartSec=3s
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          cat >"$package_root/DEBIAN/postinst" <<'EOF'
+          #!/bin/sh
+          set -eu
+
+          case "$1" in
+              configure)
+                  install -d \
+                      -o root \
+                      -g root \
+                      -m 0700 \
+                      /var/lib/caddy \
+                      /var/log/caddy
+
+                  chown root:root \
+                      /etc/caddy/Caddyfile \
+                      /etc/caddy/caddy.env
+
+                  chmod 0644 /etc/caddy/Caddyfile
+                  chmod 0600 /etc/caddy/caddy.env
+
+                  if [ -d /run/systemd/system ]; then
+                      systemctl daemon-reload
+                      systemctl enable caddy.service
+                      systemctl restart caddy.service
+                  fi
+                  ;;
+          esac
+          EOF
+
+          cat >"$package_root/DEBIAN/prerm" <<'EOF'
+          #!/bin/sh
+          set -eu
+
+          case "$1" in
+              remove)
+                  if [ -d /run/systemd/system ]; then
+                      systemctl disable --now caddy.service || true
+                  fi
+                  ;;
+          esac
+          EOF
+
+          cat >"$package_root/DEBIAN/postrm" <<'EOF'
+          #!/bin/sh
+          set -eu
+
+          case "$1" in
+              remove|purge)
+                  if [ -d /run/systemd/system ]; then
+                      systemctl daemon-reload || true
+                  fi
+                  ;;
+          esac
+          EOF
+
+          chmod 0755 \
+            "$package_root/DEBIAN/postinst" \
+            "$package_root/DEBIAN/prerm" \
+            "$package_root/DEBIAN/postrm"
+
+          chmod 0644 "$package_root/etc/caddy/Caddyfile"
+          chmod 0600 "$package_root/etc/caddy/caddy.env"
+
+          package_path="release/caddy-linux-${PACKAGE_ARCH}.deb"
+
+          dpkg-deb \
+            --build \
+            --root-owner-group \
+            "$package_root" \
+            "$package_path"
+
+          dpkg-deb --info "$package_path"
+
+      - name: Upload build artifacts
+
+        uses: actions/upload-artifact@v7
+
+        with:
+          name: caddy-${{ matrix.name }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+
+    needs:
+      - prepare
+      - build
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all build artifacts
+
+        uses: actions/download-artifact@v8
+
+        with:
+          pattern: caddy-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create complete SHA-256 manifest
+
+        shell: bash
+
+        run: |
+          set -Eeuo pipefail
+
+          cd dist
+
+          sha256sum -- * >SHA256SUMS
+
+          cat SHA256SUMS
+
+      - name: Create or update GitHub Release
+
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          CADDY_VERSION: ${{ needs.prepare.outputs.caddy_version }}
+
+          TARGET_COMMIT: ${{ github.sha }}
+
+        shell: bash
+
+        run: |
+          set -Eeuo pipefail
+
+          cat >"$RUNNER_TEMP/release-notes.md" <<EOF
+          ## Caddy $CADDY_VERSION custom build
+
+          ### Platforms
+
+          - Windows amd64: ZIP
+          - Linux amd64: tar.gz and Debian package
+          - Linux arm64: tar.gz and Debian package
+
+          ### Plugins
+
+          - github.com/mholt/caddy-l4
+          - github.com/greenpau/caddy-security
+          - github.com/caddy-dns/cloudflare
+          - github.com/WeidiDeng/caddy-cloudflare-ip
+          - github.com/xcaddyplugins/caddy-trusted-cloudfront
+          - github.com/mholt/caddy-webdav
+          - github.com/porech/caddy-maxmind-geolocation
+
+          Debian packages install and enable caddy.service automatically.
+          The Caddy service runs as root.
+          EOF
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload \
+              "$RELEASE_TAG" \
+                           dist/* \
+              --clobber
+
+            gh release edit \
+              "$RELEASE_TAG" \
+              --title "Caddy $CADDY_VERSION custom build" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
+              --latest
+
+          else
+            gh release create \
+              "$RELEASE_TAG" \
+              dist/* \
+              --target "$TARGET_COMMIT" \
+              --title "Caddy $CADDY_VERSION custom build" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
+              --latest
+          fi
