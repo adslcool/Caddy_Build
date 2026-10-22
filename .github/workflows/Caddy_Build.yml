@@ -38,7 +38,7 @@ jobs:
       github.ref_type == 'tag' ||
       github.ref_name == github.event.repository.default_branch
 
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     outputs:
       caddy_version: ${{ steps.version.outputs.caddy_version }}
@@ -127,7 +127,7 @@ jobs:
 
     if: needs.prepare.outputs.should_build == 'true'
 
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     env:
       CADDY_VERSION: ${{ needs.prepare.outputs.caddy_version }}
