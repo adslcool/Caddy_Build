@@ -38,7 +38,7 @@ jobs:
       github.ref_type == 'tag' ||
       github.ref_name == github.event.repository.default_branch
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     outputs:
       caddy_version: ${{ steps.version.outputs.caddy_version }}
@@ -127,7 +127,7 @@ jobs:
 
     if: needs.prepare.outputs.should_build == 'true'
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     env:
       CADDY_VERSION: ${{ needs.prepare.outputs.caddy_version }}
@@ -492,3 +492,4 @@ jobs:
               --notes-file "$RUNNER_TEMP/release-notes.md" \
               --latest
           fi
+
