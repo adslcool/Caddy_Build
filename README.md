@@ -26,15 +26,15 @@
 
 https://github.com/adslcool/Caddy_Build/releases/latest
 
-Release 包含：
+Release 标题和说明使用简体中文，所有发布附件均带 Caddy 版本号。以 `v2.x.x` 为例：
 
 ```text
-caddy-windows-amd64.zip
-caddy-linux-amd64.tar.gz
-caddy-linux-amd64.deb
-caddy-linux-arm64.tar.gz
-caddy-linux-arm64.deb
-SHA256SUMS
+caddy-v2.x.x-windows-amd64.zip
+caddy-v2.x.x-linux-amd64.tar.gz
+caddy-v2.x.x-linux-amd64.deb
+caddy-v2.x.x-linux-arm64.tar.gz
+caddy-v2.x.x-linux-arm64.deb
+SHA256SUMS-v2.x.x.txt
 ```
 
 ## Debian / Ubuntu 一键安装
@@ -43,8 +43,11 @@ SHA256SUMS
 
 ```bash
 ARCH="$(dpkg --print-architecture)" && \
+RELEASE_URL="$(curl -fsSL -o /dev/null -w '%{url_effective}' \
+  https://github.com/adslcool/Caddy_Build/releases/latest)" && \
+CADDY_VERSION="${RELEASE_URL##*/}" && \
 curl -fL \
-"https://github.com/adslcool/Caddy_Build/releases/latest/download/caddy-linux-${ARCH}.deb" \
+"https://github.com/adslcool/Caddy_Build/releases/download/${CADDY_VERSION}/caddy-${CADDY_VERSION}-linux-${ARCH}.deb" \
 -o /tmp/caddy.deb && \
 sudo apt install -y /tmp/caddy.deb
 ```
@@ -71,6 +74,11 @@ journalctl -u caddy -f
 ```
 
 ## 构建
+
+首次将工作流上传到默认分支的 `.github/workflows/Caddy_Build.yml` 时自动检查并构建。
+以后每天北京时间 **08:00** 检查 Caddy 最新正式版；对应版本已发布且附件完整时跳过，未发布或附件不完整时自动编译发布。
+手动运行可强制重新构建。构建文件仅上传 GitHub Release，不使用 Actions Artifacts，构建日志仍保留在 Actions 页面。
+
 
 进入：
 
